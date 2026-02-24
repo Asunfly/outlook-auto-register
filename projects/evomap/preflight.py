@@ -391,6 +391,7 @@ def run_preflight(mode='smart'):
     all_used_codes = {}
     confirmed_accounts = []
     login_failed_accounts = []
+    unknown_accounts = []  # 密码未知的账号
     account_details = {}  # 每个账号的详细邀请码信息
 
     with sync_playwright() as pw:
