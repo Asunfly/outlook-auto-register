@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "control_url": "http://192.168.100.1:9090",
+  "secret": "123456",
+  "proxy_group": "🌐 全部节点",
+  "proxy_port": 7890,
+  "strategy": "random",
+  "_comment": "strategy 可选值: random(随机), sequential(顺序), least_used(最少使用)"
+}

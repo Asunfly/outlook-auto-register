@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code
+.claude/settings.local.json
+
+# 项目特定 - 真实数据文件（敏感信息）
+data/outlook令牌号.csv
+data/proxies.txt
+data/mihomo.json
+projects/evomap/output/*.csv
+projects/evomap/output/*.json
+!projects/evomap/output/*.example.json
+projects/chatgpt/output/
+*.log
+
+# 开发过程文件（归档）
+dev-archive/
+参考文件/
+
+# 临时文件
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db

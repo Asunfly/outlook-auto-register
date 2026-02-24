@@ -1,0 +1,17 @@
+{
+  "version": "2.0",
+  "invite_pool": [
+    "ABCD1234"
+  ],
+  "output_codes": [],
+  "accounts": {},
+  "invite_codes_history": {},
+  "statistics": {
+    "total_accounts": 0,
+    "completed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "total_codes_generated": 0,
+    "last_updated": "2026-02-24 00:00:00"
+  }
+}
