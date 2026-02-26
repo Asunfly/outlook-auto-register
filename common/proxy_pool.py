@@ -1,10 +1,11 @@
 """
 IP 代理池通用模块 (增强版)
 
-支持三种代理方式:
+支持四种代理方式:
   1. 常规代理 — HTTP/HTTPS/SOCKS5 静态代理列表或 API
-  2. Mihomo 本地代理 — 通过本地 Mihomo 控制端口切换节点
-  3. Mihomo 远程代理 — 通过远程 Mihomo API 切换节点
+  2. 免费代理自动抓取 — 从 free-proxy-list.net 自动抓取并验证
+  3. Mihomo 本地代理 — 通过本地 Mihomo 控制端口切换节点
+  4. Mihomo 远程代理 — 通过远程 Mihomo API 切换节点
 
 本模块只负责: 管理代理池 → 提供可用代理 → 标记失败代理 → 自动切换节点
 具体的代理使用逻辑由调用方决定。
@@ -15,14 +16,17 @@ IP 代理池通用模块 (增强版)
     # 方式1: 常规代理（从文件加载）
     pool = ProxyPool.from_file("data/proxies.txt")
 
-    # 方式2: Mihomo 本地代理
+    # 方式2: 免费代理自动抓取
+    pool = ProxyPool.from_free_proxy(save_path="data/proxies.txt")
+
+    # 方式3: Mihomo 本地代理
     pool = ProxyPool.from_mihomo_local(
         control_url="http://127.0.0.1:9090",
         secret="your_secret",
         proxy_group="PROXY"  # 代理组名称
     )
 
-    # 方式3: Mihomo 远程代理
+    # 方式4: Mihomo 远程代理
     pool = ProxyPool.from_mihomo_remote(
         control_url="http://remote-server:9090",
         secret="your_secret",
@@ -226,6 +230,34 @@ class ProxyPool:
              f"{'节点数=' + str(len(self.mihomo_nodes)) if self.mode == 'mihomo' else '代理数=' + str(len(self.proxies))}")
 
     @classmethod
+    def from_free_proxy(cls, save_path: str = None, min_count: int = 3,
+                        validate_url: str = "https://www.google.com", **kwargs):
+        """
+        从免费代理源自动抓取并创建代理池
+
+        参数:
+            save_path: 保存代理列表的文件路径（可选，保存后可复用）
+            min_count: 最少需要的代理数量
+            validate_url: 验证代理可用性的 URL
+        """
+        from free_proxy_fetcher import FreeProxyFetcher
+
+        fetcher = FreeProxyFetcher(validate_url=validate_url)
+        proxies = fetcher.fetch_and_validate()
+
+        if len(proxies) < min_count:
+            _log(f"可用代理数量 ({len(proxies)}) 少于最低要求 ({min_count})", "WARN")
+
+        if save_path and proxies:
+            fetcher.save_to_file(save_path, proxies)
+
+        if not proxies:
+            _log("未获取到可用免费代理", "ERROR")
+            return cls(**kwargs)
+
+        return cls(proxies=proxies, **kwargs)
+
+    @classmethod
     def from_file(cls, file_path: str, **kwargs):
         """从文件加载常规代理列表"""
         proxies = []
@@ -239,6 +271,29 @@ class ProxyPool:
         except Exception as e:
             _log(f"加载代理文件失败: {e}", "ERROR")
 
+        return cls(proxies=proxies, **kwargs)
+
+    @classmethod
+    def from_files(cls, file_paths: list, **kwargs):
+        """从多个文件合并加载代理列表（自动去重，保持顺序）"""
+        import os
+        seen = set()
+        proxies = []
+        for fp in file_paths:
+            if not os.path.exists(fp):
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and line not in seen:
+                            seen.add(line)
+                            proxies.append(line)
+                _log(f"从文件加载代理: {fp}")
+            except Exception as e:
+                _log(f"加载代理文件失败 {fp}: {e}", "ERROR")
+
+        _log(f"合并加载 {len(proxies)} 个代理（来自 {len(file_paths)} 个文件）")
         return cls(proxies=proxies, **kwargs)
 
     @classmethod
@@ -542,7 +597,7 @@ def create_proxy_pool_from_env():
     从环境变量创建代理池
 
     支持的环境变量:
-    - PROXY_MODE: 代理模式 (normal/mihomo_local/mihomo_remote)
+    - PROXY_MODE: 代理模式 (normal/free_proxy/mihomo_local/mihomo_remote)
     - PROXY_LIST: 逗号分隔的代理列表
     - PROXY_FILE: 代理文件路径
     - PROXY_API_URL: 代理 API 地址
@@ -556,7 +611,11 @@ def create_proxy_pool_from_env():
 
     mode = os.environ.get("PROXY_MODE", "normal")
 
-    if mode == "mihomo_local":
+    if mode == "free_proxy":
+        save_path = os.environ.get("PROXY_FILE", None)
+        return ProxyPool.from_free_proxy(save_path=save_path)
+
+    elif mode == "mihomo_local":
         control_url = os.environ.get("MIHOMO_CONTROL_URL", "http://127.0.0.1:9090")
         secret = os.environ.get("MIHOMO_SECRET", "")
         group = os.environ.get("MIHOMO_GROUP", "PROXY")

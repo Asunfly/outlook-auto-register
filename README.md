@@ -13,13 +13,10 @@ python start.py
 启动向导会自动：
 1. 检查数据文件是否存在
 2. 引导创建邮箱资源池
-3. 选择项目（EvoMap / ChatGPT）
-4. 初始化配置（如 EvoMap 初始邀请码）
-5. 启动注册流程
-
-### 手动启动
-
-如果你已经配置好所有文件，也可以直接运行：
+3. 配置代理方式（自动抓取免费代理 / 已有代理文件 / Mihomo / 手动输入）
+4. 选择项目（EvoMap / ChatGPT）
+5. 初始化配置（如 EvoMap 初始邀请码）
+6. 启动注册流程
 
 ### 手动启动
 
@@ -56,7 +53,8 @@ pip install curl_cffi requests
 │
 ├── data/                        # 数据目录（真实数据，已忽略）
 │   ├── outlook令牌号.csv        # 邮箱资源池
-│   └── proxies.txt              # 代理列表（可选）
+│   ├── proxies.txt              # 手动维护的代理列表（可选）
+│   └── free_proxies.txt         # 自动抓取的免费代理（可选）
 │
 ├── data-templates/              # 数据文件模板（会提交）
 │   ├── README.md                # 模板说明
@@ -65,7 +63,9 @@ pip install curl_cffi requests
 │
 ├── common/                      # 共享模块
 │   ├── outlook_mail.py          # 邮箱接码模块
-│   └── proxy_pool.py            # 代理池模块
+│   ├── proxy_pool.py            # 代理池模块
+│   ├── free_proxy_fetcher.py    # 免费代理自动抓取模块
+│   └── PROXY_GUIDE.md           # 代理配置完整指南
 │
 ├── projects/                    # 注册项目
 │   ├── evomap/                  # EvoMap 注册项目
@@ -83,10 +83,6 @@ pip install curl_cffi requests
 │       ├── register.py          # 并发注册主脚本
 │       ├── README.md
 │       └── output/              # 输出目录（已忽略）
-│
-├── docs/                        # 文档目录
-│   ├── proxy_normal_guide.md    # 常规代理使用指南
-│   └── proxy_quickstart.md      # 代理池快速开始
 │
 ├── dev-archive/                 # 开发归档（已忽略）
 │   ├── STATE_MANAGEMENT_OPTIMIZATION_V2.md  # 状态管理优化方案
@@ -159,11 +155,12 @@ code = client.poll_for_code(known_ids, timeout=120)
 
 ### proxy_pool.py - IP 代理池模块
 
-统一的 IP 代理管理模块，支持两种代理方式:
+统一的 IP 代理管理模块，支持三种代理方式:
 
 | 方式 | 说明 | 适用场景 | 推荐度 |
 |------|------|---------|--------|
-| 常规代理 | HTTP/HTTPS/SOCKS5 静态列表或 API | 有固定代理服务商，需要轮换多个代理 IP | ⭐⭐⭐⭐⭐ 推荐 |
+| 免费代理自动抓取 | 从 free-proxy-list.net 自动抓取 | 快速上手、测试环境 | ⭐⭐⭐ 入门推荐 |
+| 常规代理 | HTTP/HTTPS/SOCKS5 静态列表或 API | 有固定代理服务商，需要轮换多个代理 IP | ⭐⭐⭐⭐⭐ 生产推荐 |
 | Mihomo 代理 | 复用宿主机或远程的 Mihomo 服务 | 已使用 Mihomo 科学上网，接受全局切换 | ⭐⭐⭐ 备选 |
 
 **注意**: Mihomo 模式会影响所有使用该代理的应用（全局切换）。如需隔离，建议使用常规代理池。
@@ -179,17 +176,20 @@ code = client.poll_for_code(known_ids, timeout=120)
 ```python
 from proxy_pool import ProxyPool
 
-# 方式1: 常规代理（推荐，从文件加载）
+# 方式1: 免费代理自动抓取（零配置，适合测试）
+pool = ProxyPool.from_free_proxy(save_path="data/proxies.txt")
+
+# 方式2: 常规代理（推荐，从文件加载）
 pool = ProxyPool.from_file("data/proxies.txt")
 
-# 方式2: Mihomo 本地代理（复用宿主机 Mihomo）
+# 方式3: Mihomo 本地代理（复用宿主机 Mihomo）
 pool = ProxyPool.from_mihomo_local(
     control_url="http://127.0.0.1:9090",  # Mihomo API 地址
     secret="",                             # API 密钥
     proxy_group="PROXY"                    # 代理组名称
 )
 
-# 方式3: Mihomo 远程代理（复用远程服务器 Mihomo）
+# 方式4: Mihomo 远程代理（复用远程服务器 Mihomo）
 pool = ProxyPool.from_mihomo_remote(
     control_url="http://remote-server:9090",
     secret="your_secret",
@@ -218,9 +218,7 @@ pool.mark_success(proxy)
 | `max_failures` | int | 最大失败次数，默认 3 |
 | `auto_switch` | bool | 失败时自动切换节点（仅 Mihomo），默认 True |
 
-**常规代理指南**: 参见 [docs/proxy_normal_guide.md](docs/proxy_normal_guide.md) （推荐阅读）
-
-**Mihomo 配置指南**: 参见 [docs/mihomo_guide.md](docs/mihomo_guide.md) （复用现有 Mihomo 服务）
+**完整代理配置指南**: 参见 [common/PROXY_GUIDE.md](common/PROXY_GUIDE.md) （免费代理、常规代理、Mihomo 代理）
 
 ## 数据文件配置
 
@@ -346,6 +344,6 @@ python projects/chatgpt/register.py --help
 
 ## 文档
 
-- [代理配置指南](docs/PROXY_GUIDE.md) - 常规代理和 Mihomo 代理完整配置说明
+- [代理配置指南](common/PROXY_GUIDE.md) - 免费代理自动抓取、常规代理和 Mihomo 代理完整配置说明
 - [EvoMap 使用说明](projects/evomap/README.md) - EvoMap 项目详细文档
 - [ChatGPT 使用说明](projects/chatgpt/README.md) - ChatGPT 项目详细文档

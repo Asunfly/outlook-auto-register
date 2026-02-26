@@ -1151,6 +1151,8 @@ def main():
     print("=" * 60)
 
     # 支持命令行参数: --auto (自动模式，不交互), --email-file <path> (指定邮箱文件)
+    #                  --proxy-mode <mode> (代理模式: free_proxy/file/mihomo/manual/none)
+    #                  --proxy <addr> (手动代理地址)
     auto_mode = "--auto" in sys.argv
 
     # 解析 --email-file 参数
@@ -1160,73 +1162,138 @@ def main():
             custom_email_file = sys.argv[i + 1]
             break
 
+    # 解析 --proxy-mode 参数
+    proxy_mode_arg = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--proxy-mode" and i + 1 < len(sys.argv):
+            proxy_mode_arg = sys.argv[i + 1]
+            break
+
     # 代理配置
     proxy = None
     proxy_pool = None
 
-    # 1. 尝试加载 Mihomo 配置文件
-    mihomo_config = load_mihomo_config()
-    if mihomo_config:
-        log(f"检测到 Mihomo 配置文件")
-        log(f"  API: {mihomo_config['control_url']}")
-        log(f"  代理组: {mihomo_config['proxy_group']}")
+    # 两个代理文件路径
+    free_proxy_file = os.path.join(_PROJECT_ROOT, "data", "free_proxies.txt")
+    manual_proxy_file = os.path.join(_PROJECT_ROOT, "data", "proxies.txt")
 
-        try:
-            # 判断是本地还是远程
-            control_url = mihomo_config['control_url']
-            strategy = mihomo_config.get('strategy', 'random')  # 默认随机
-
-            if "127.0.0.1" in control_url or "localhost" in control_url:
-                proxy_pool = ProxyPool.from_mihomo_local(
-                    control_url=control_url,
-                    secret=mihomo_config.get('secret', ''),
-                    proxy_group=mihomo_config['proxy_group'],
-                    proxy_port=mihomo_config.get('proxy_port', 7890),
-                    strategy=strategy
-                )
-            else:
-                proxy_pool = ProxyPool.from_mihomo_remote(
-                    control_url=control_url,
-                    secret=mihomo_config.get('secret', ''),
-                    proxy_group=mihomo_config['proxy_group'],
-                    proxy_port=mihomo_config.get('proxy_port', 7890),
-                    strategy=strategy
-                )
-            log(f"Mihomo 代理池创建成功（策略: {strategy}）")
-        except Exception as e:
-            log(f"Mihomo 代理池创建失败: {e}", "ERROR")
-            log("继续使用无代理模式", "WARN")
-
-    # 2. 如果没有 Mihomo 配置，检查环境变量代理
-    if not proxy_pool:
-        env_proxy = (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-                     or os.environ.get("ALL_PROXY") or os.environ.get("all_proxy"))
-
-        if auto_mode:
-            # 自动模式：使用环境变量代理
-            proxy = env_proxy
-            if proxy:
-                log(f"使用环境变量代理: {proxy}")
-            else:
-                log("不使用代理")
+    # 根据 --proxy-mode 参数配置代理
+    if proxy_mode_arg == "free_proxy":
+        # 自动抓取模式：合并 free_proxies.txt + proxies.txt
+        files = [free_proxy_file, manual_proxy_file]
+        if any(os.path.exists(f) for f in files):
+            proxy_pool = ProxyPool.from_files(files, strategy="random")
+            log(f"使用合并代理池: {[f for f in files if os.path.exists(f)]}")
         else:
-            # 交互模式：询问是否使用代理
-            if env_proxy:
-                log(f"检测到环境变量代理: {env_proxy}")
-                use_env = input("使用此代理? (Y/n): ").strip().lower()
-                if use_env == "n":
-                    proxy = input("输入代理地址 (留空=不使用): ").strip() or None
-                else:
-                    proxy = env_proxy
-            else:
-                use_proxy = input("是否使用代理? (y/N): ").strip().lower()
-                if use_proxy == "y":
-                    proxy = input("输入代理地址 (如 http://127.0.0.1:7890): ").strip() or None
+            log("代理文件均不存在，尝试实时抓取...", "WARN")
+            try:
+                proxy_pool = ProxyPool.from_free_proxy(save_path=free_proxy_file)
+                log("免费代理池创建成功")
+            except Exception as e:
+                log(f"免费代理抓取失败: {e}", "ERROR")
+                log("继续使用无代理模式", "WARN")
 
-            if proxy:
-                log(f"使用固定代理: {proxy}")
+    elif proxy_mode_arg == "file":
+        # 已有代理文件模式：合并 proxies.txt + free_proxies.txt
+        files = [manual_proxy_file, free_proxy_file]
+        if os.path.exists(manual_proxy_file):
+            proxy_pool = ProxyPool.from_files(files, strategy="random")
+            log(f"使用合并代理池: {[f for f in files if os.path.exists(f)]}")
+        else:
+            log(f"代理文件不存在: {manual_proxy_file}", "ERROR")
+
+    elif proxy_mode_arg == "mihomo":
+        # Mihomo 代理（走原有逻辑）
+        mihomo_config = load_mihomo_config()
+        if mihomo_config:
+            try:
+                control_url = mihomo_config['control_url']
+                strategy = mihomo_config.get('strategy', 'random')
+                if "127.0.0.1" in control_url or "localhost" in control_url:
+                    proxy_pool = ProxyPool.from_mihomo_local(
+                        control_url=control_url,
+                        secret=mihomo_config.get('secret', ''),
+                        proxy_group=mihomo_config['proxy_group'],
+                        proxy_port=mihomo_config.get('proxy_port', 7890),
+                        strategy=strategy
+                    )
+                else:
+                    proxy_pool = ProxyPool.from_mihomo_remote(
+                        control_url=control_url,
+                        secret=mihomo_config.get('secret', ''),
+                        proxy_group=mihomo_config['proxy_group'],
+                        proxy_port=mihomo_config.get('proxy_port', 7890),
+                        strategy=strategy
+                    )
+                log(f"Mihomo 代理池创建成功（策略: {strategy}）")
+            except Exception as e:
+                log(f"Mihomo 代理池创建失败: {e}", "ERROR")
+
+    elif proxy_mode_arg == "none":
+        log("不使用代理")
+
+    else:
+        # 未指定 --proxy-mode，走原有交互逻辑
+        # 1. 尝试加载 Mihomo 配置文件
+        mihomo_config = load_mihomo_config()
+        if mihomo_config:
+            log(f"检测到 Mihomo 配置文件")
+            log(f"  API: {mihomo_config['control_url']}")
+            log(f"  代理组: {mihomo_config['proxy_group']}")
+
+            try:
+                control_url = mihomo_config['control_url']
+                strategy = mihomo_config.get('strategy', 'random')
+
+                if "127.0.0.1" in control_url or "localhost" in control_url:
+                    proxy_pool = ProxyPool.from_mihomo_local(
+                        control_url=control_url,
+                        secret=mihomo_config.get('secret', ''),
+                        proxy_group=mihomo_config['proxy_group'],
+                        proxy_port=mihomo_config.get('proxy_port', 7890),
+                        strategy=strategy
+                    )
+                else:
+                    proxy_pool = ProxyPool.from_mihomo_remote(
+                        control_url=control_url,
+                        secret=mihomo_config.get('secret', ''),
+                        proxy_group=mihomo_config['proxy_group'],
+                        proxy_port=mihomo_config.get('proxy_port', 7890),
+                        strategy=strategy
+                    )
+                log(f"Mihomo 代理池创建成功（策略: {strategy}）")
+            except Exception as e:
+                log(f"Mihomo 代理池创建失败: {e}", "ERROR")
+                log("继续使用无代理模式", "WARN")
+
+        # 2. 如果没有 Mihomo 配置，检查环境变量代理
+        if not proxy_pool:
+            env_proxy = (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+                         or os.environ.get("ALL_PROXY") or os.environ.get("all_proxy"))
+
+            if auto_mode:
+                proxy = env_proxy
+                if proxy:
+                    log(f"使用环境变量代理: {proxy}")
+                else:
+                    log("不使用代理")
             else:
-                log("不使用代理")
+                if env_proxy:
+                    log(f"检测到环境变量代理: {env_proxy}")
+                    use_env = input("使用此代理? (Y/n): ").strip().lower()
+                    if use_env == "n":
+                        proxy = input("输入代理地址 (留空=不使用): ").strip() or None
+                    else:
+                        proxy = env_proxy
+                else:
+                    use_proxy = input("是否使用代理? (y/N): ").strip().lower()
+                    if use_proxy == "y":
+                        proxy = input("输入代理地址 (如 http://127.0.0.1:7890): ").strip() or None
+
+                if proxy:
+                    log(f"使用固定代理: {proxy}")
+                else:
+                    log("不使用代理")
 
     # 邮箱文件
     if custom_email_file:

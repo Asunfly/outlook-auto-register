@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(_PROJECT_ROOT, "common"))
 
 from curl_cffi import requests as curl_requests
 from outlook_mail import OutlookMailClient
+from proxy_pool import ProxyPool
 
 # 全局线程锁
 _print_lock = threading.Lock()
@@ -424,9 +425,13 @@ class ChatGPTRegister:
 # ==================== 并发批量注册 ====================
 
 def _register_one(idx, total, email, outlook_pwd, client_id, refresh_token,
-                   proxy, output_file, mail_mode="imap"):
+                   proxy, output_file, mail_mode="imap", proxy_pool=None):
     """单个邮箱注册任务 (在线程中运行)"""
     tag = email.split("@")[0]  # 用邮箱前缀做日志标识
+
+    # 如果有代理池，从池中获取代理
+    if proxy_pool:
+        proxy = proxy_pool.get_proxy()
 
     chatgpt_password = _generate_password()
     name = _random_name()
@@ -447,11 +452,16 @@ def _register_one(idx, total, email, outlook_pwd, client_id, refresh_token,
             with open(output_file, "a", encoding="utf-8") as out:
                 out.write(f"{email}----{chatgpt_password}\n")
 
+        if proxy_pool and proxy:
+            proxy_pool.mark_success(proxy)
+
         with _print_lock:
             print(f"\n[OK] [{tag}] {email} 注册成功!")
         return True, email, None
 
     except Exception as e:
+        if proxy_pool and proxy:
+            proxy_pool.mark_failed(proxy)
         with _print_lock:
             print(f"\n[FAIL] [{tag}] {email} 注册失败: {e}")
             traceback.print_exc()
@@ -459,7 +469,7 @@ def _register_one(idx, total, email, outlook_pwd, client_id, refresh_token,
 
 
 def run_batch(input_file, output_file=None,
-              max_workers=3, proxy=None, mail_mode="imap"):
+              max_workers=3, proxy=None, mail_mode="imap", proxy_pool=None):
     """并发批量注册"""
     if output_file is None:
         output_file = DEFAULT_OUTPUT_FILE
@@ -512,6 +522,7 @@ def run_batch(input_file, output_file=None,
             future = executor.submit(
                 _register_one, idx, total, email, outlook_pwd,
                 client_id, refresh_token, proxy, output_file, mail_mode,
+                proxy_pool,
             )
             futures[future] = email
 
@@ -544,22 +555,100 @@ def main():
     print("  ChatGPT 批量自动注册工具 (并发版)")
     print("=" * 60)
 
-    # 交互式代理配置
-    env_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") \
-             or os.environ.get("ALL_PROXY") or os.environ.get("all_proxy")
-    if env_proxy:
-        print(f"[Info] 检测到环境变量代理: {env_proxy}")
-        use_env = input("使用此代理? (Y/n): ").strip().lower()
-        if use_env == "n":
-            proxy = input("输入代理地址 (留空=不使用代理): ").strip() or None
+    # 解析 --proxy-mode 参数
+    proxy_mode_arg = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--proxy-mode" and i + 1 < len(sys.argv):
+            proxy_mode_arg = sys.argv[i + 1]
+            break
+
+    # 代理配置
+    proxy = None
+    proxy_pool = None
+
+    # 两个代理文件路径
+    free_proxy_file = os.path.join(_PROJECT_ROOT, "data", "free_proxies.txt")
+    manual_proxy_file = os.path.join(_PROJECT_ROOT, "data", "proxies.txt")
+
+    if proxy_mode_arg == "free_proxy":
+        # 自动抓取模式：合并 free_proxies.txt + proxies.txt
+        files = [free_proxy_file, manual_proxy_file]
+        if any(os.path.exists(f) for f in files):
+            proxy_pool = ProxyPool.from_files(files, strategy="random")
+            print(f"[Info] 使用合并代理池: {[f for f in files if os.path.exists(f)]}")
         else:
-            proxy = env_proxy
-    else:
-        proxy = input("输入代理地址 (如 http://127.0.0.1:7890，留空=不使用代理): ").strip() or None
-    if proxy:
-        print(f"[Info] 代理: {proxy}")
-    else:
+            print("[Warn] 代理文件均不存在，尝试实时抓取...")
+            try:
+                proxy_pool = ProxyPool.from_free_proxy(save_path=free_proxy_file)
+                print("[Info] 免费代理池创建成功")
+            except Exception as e:
+                print(f"[Error] 免费代理抓取失败: {e}")
+
+    elif proxy_mode_arg == "file":
+        # 已有代理文件模式：合并 proxies.txt + free_proxies.txt
+        files = [manual_proxy_file, free_proxy_file]
+        if os.path.exists(manual_proxy_file):
+            proxy_pool = ProxyPool.from_files(files, strategy="random")
+            print(f"[Info] 使用合并代理池: {[f for f in files if os.path.exists(f)]}")
+        else:
+            print(f"[Error] 代理文件不存在: {manual_proxy_file}")
+
+    elif proxy_mode_arg == "mihomo":
+        mihomo_config_file = os.path.join(_PROJECT_ROOT, "data", "mihomo.json")
+        if os.path.exists(mihomo_config_file):
+            import json as _json
+            with open(mihomo_config_file, "r", encoding="utf-8") as f:
+                mihomo_config = _json.load(f)
+            if mihomo_config.get("enabled", True):
+                try:
+                    control_url = mihomo_config['control_url']
+                    strategy = mihomo_config.get('strategy', 'random')
+                    if "127.0.0.1" in control_url or "localhost" in control_url:
+                        proxy_pool = ProxyPool.from_mihomo_local(
+                            control_url=control_url,
+                            secret=mihomo_config.get('secret', ''),
+                            proxy_group=mihomo_config['proxy_group'],
+                            proxy_port=mihomo_config.get('proxy_port', 7890),
+                            strategy=strategy
+                        )
+                    else:
+                        proxy_pool = ProxyPool.from_mihomo_remote(
+                            control_url=control_url,
+                            secret=mihomo_config.get('secret', ''),
+                            proxy_group=mihomo_config['proxy_group'],
+                            proxy_port=mihomo_config.get('proxy_port', 7890),
+                            strategy=strategy
+                        )
+                    print(f"[Info] Mihomo 代理池创建成功（策略: {strategy}）")
+                except Exception as e:
+                    print(f"[Error] Mihomo 代理池创建失败: {e}")
+
+    elif proxy_mode_arg == "none":
         print("[Info] 不使用代理")
+
+    else:
+        # 未指定 --proxy-mode，走原有交互逻辑
+        env_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") \
+                 or os.environ.get("ALL_PROXY") or os.environ.get("all_proxy")
+        if env_proxy:
+            print(f"[Info] 检测到环境变量代理: {env_proxy}")
+            use_env = input("使用此代理? (Y/n): ").strip().lower()
+            if use_env == "n":
+                proxy = input("输入代理地址 (留空=不使用代理): ").strip() or None
+            else:
+                proxy = env_proxy
+        else:
+            proxy = input("输入代理地址 (如 http://127.0.0.1:7890，留空=不使用代理): ").strip() or None
+        if proxy:
+            print(f"[Info] 代理: {proxy}")
+        else:
+            print("[Info] 不使用代理")
+
+    # 如果有代理池但没有固定代理，从池中取一个用于显示
+    if proxy_pool and not proxy:
+        proxy = proxy_pool.get_proxy()
+        if proxy:
+            print(f"[Info] 代理池首个代理: {proxy}")
 
     # 邮件获取方式选择
     print("\n邮件获取方式:")
@@ -577,7 +666,8 @@ def main():
     workers_input = input("并发数 (默认 3): ").strip()
     max_workers = int(workers_input) if workers_input.isdigit() and int(workers_input) > 0 else 3
 
-    run_batch(input_file, max_workers=max_workers, proxy=proxy, mail_mode=mail_mode)
+    run_batch(input_file, max_workers=max_workers, proxy=proxy,
+              mail_mode=mail_mode, proxy_pool=proxy_pool)
 
 
 if __name__ == "__main__":

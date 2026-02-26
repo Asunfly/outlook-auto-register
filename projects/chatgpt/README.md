@@ -38,7 +38,7 @@ pip install curl_cffi
    # 脚本会自动检测环境变量，也可手动输入
    ```
 
-   **注意**：当前版本使用单个固定代理，如需代理轮换功能（避免 429 限流），请参考 [../docs/proxy_normal_guide.md](../docs/proxy_normal_guide.md) 集成 proxy_pool 模块。
+   **注意**：代理轮换功能已集成，详见 [../../common/PROXY_GUIDE.md](../../common/PROXY_GUIDE.md)。
 
 ### 运行注册
 

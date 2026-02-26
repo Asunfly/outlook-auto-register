@@ -4,9 +4,10 @@
 
 功能：
 1. 检查数据文件是否存在
-2. 引导用户选择项目（EvoMap / ChatGPT）
-3. 自动初始化配置
-4. 启动注册流程
+2. 配置代理方式（自动抓取免费代理 / 已有代理文件 / Mihomo / 不使用）
+3. 引导用户选择项目（EvoMap / ChatGPT）
+4. 自动初始化配置
+5. 启动注册流程
 """
 
 import os
@@ -17,11 +18,16 @@ from pathlib import Path
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.absolute()
 
+# 将 common 目录加入 sys.path
+sys.path.insert(0, str(PROJECT_ROOT / "common"))
+
 # 数据文件路径
 EMAIL_FILE = PROJECT_ROOT / "data" / "outlook令牌号.csv"
 EMAIL_EXAMPLE = PROJECT_ROOT / "data-templates" / "outlook令牌号.example.csv"
 PROXY_FILE = PROJECT_ROOT / "data" / "proxies.txt"
+FREE_PROXY_FILE = PROJECT_ROOT / "data" / "free_proxies.txt"
 PROXY_EXAMPLE = PROJECT_ROOT / "data-templates" / "proxies.example.txt"
+MIHOMO_CONFIG = PROJECT_ROOT / "data" / "mihomo.json"
 
 # 项目配置
 EVOMAP_STATE = PROJECT_ROOT / "projects" / "evomap" / "output" / "state.json"
@@ -54,6 +60,12 @@ def check_data_files():
     else:
         print(f"[OK] 代理列表: {PROXY_FILE}")
 
+    # 检查 Mihomo 配置（可选）
+    if MIHOMO_CONFIG.exists():
+        print(f"[OK] Mihomo 配置: {MIHOMO_CONFIG}")
+    else:
+        print(f"[可选] Mihomo 配置: {MIHOMO_CONFIG} (未配置)")
+
     return missing
 
 
@@ -83,6 +95,78 @@ def setup_email_file():
     else:
         print("\n请手动创建邮箱文件后重新运行此脚本")
         sys.exit(0)
+
+
+def configure_proxy():
+    """配置代理方式，返回 proxy_mode 字符串"""
+    print_header("步骤 2: 配置代理")
+
+    # 检测已有配置
+    has_proxy_file = PROXY_FILE.exists() and PROXY_FILE.stat().st_size > 10
+    has_free_proxy_file = FREE_PROXY_FILE.exists() and FREE_PROXY_FILE.stat().st_size > 10
+    has_mihomo = MIHOMO_CONFIG.exists()
+
+    print("\n代理方式:")
+    print("  1. 自动抓取免费代理（默认，从 free-proxy-list.net 抓取）")
+    if has_proxy_file or has_free_proxy_file:
+        extra = []
+        if has_proxy_file:
+            extra.append("proxies.txt")
+        if has_free_proxy_file:
+            extra.append("free_proxies.txt")
+        print(f"     已有代理文件 ({', '.join(extra)}) 会一并加入代理池")
+    print("  2. 使用已有代理文件" + (f" ({PROXY_FILE})" if has_proxy_file else " (需先配置 data/proxies.txt)"))
+    print("  3. Mihomo 代理" + (" (已检测到配置)" if has_mihomo else " (需先配置 data/mihomo.json)"))
+    print("  4. 不使用代理")
+
+    choice = input("\n请选择 (1/2/3/4，默认 1): ").strip() or "1"
+
+    if choice == "1":
+        print("\n[Info] 将自动抓取免费代理并生成代理池...")
+        print("[Info] 抓取过程需要访问外网，请确保网络畅通")
+
+        try:
+            from free_proxy_fetcher import fetch_and_save
+            proxy_file = str(FREE_PROXY_FILE)
+            proxies = fetch_and_save(proxy_file, min_count=3)
+
+            if proxies:
+                print(f"\n[OK] 已获取 {len(proxies)} 个可用代理，保存到 {FREE_PROXY_FILE}")
+                return "free_proxy"
+            else:
+                print("\n[警告] 未能获取到可用代理")
+                fallback = input("是否继续（不使用代理）? (Y/n): ").strip().lower()
+                if fallback == "n":
+                    sys.exit(0)
+                return "none"
+        except Exception as e:
+            print(f"\n[错误] 自动抓取代理失败: {e}")
+            fallback = input("是否继续（不使用代理）? (Y/n): ").strip().lower()
+            if fallback == "n":
+                sys.exit(0)
+            return "none"
+
+    elif choice == "2":
+        if not has_proxy_file:
+            print(f"\n[错误] 代理文件不存在: {PROXY_FILE}")
+            print(f"请参考模板创建: {PROXY_EXAMPLE}")
+            sys.exit(1)
+        print(f"\n[OK] 使用代理文件: {PROXY_FILE}")
+        if has_free_proxy_file:
+            print(f"[OK] 同时加载免费代理: {FREE_PROXY_FILE}")
+        return "file"
+
+    elif choice == "3":
+        if not has_mihomo:
+            print(f"\n[错误] Mihomo 配置不存在: {MIHOMO_CONFIG}")
+            print("请参考模板创建: data-templates/mihomo.example.json")
+            sys.exit(1)
+        print(f"\n[OK] 使用 Mihomo 代理")
+        return "mihomo"
+
+    else:
+        print("\n[Info] 不使用代理")
+        return "none"
 
 
 def check_evomap_state():
@@ -117,7 +201,7 @@ def check_evomap_state():
 
 def select_project():
     """选择要运行的项目"""
-    print_header("步骤 2: 选择项目")
+    print_header("步骤 3: 选择项目")
 
     print("\n可用项目:")
     print("  1. EvoMap - 邀请码裂变注册（需要初始邀请码）")
@@ -135,7 +219,12 @@ def select_project():
         sys.exit(0)
 
 
-def run_evomap():
+def _build_proxy_args(proxy_mode):
+    """根据代理模式构建传递给子项目的命令行参数"""
+    return ["--proxy-mode", proxy_mode]
+
+
+def run_evomap(proxy_mode):
     """运行 EvoMap 项目"""
     print_header("启动 EvoMap 注册")
 
@@ -154,36 +243,35 @@ def run_evomap():
 
     os.chdir(PROJECT_ROOT / "projects" / "evomap")
 
+    proxy_args = _build_proxy_args(proxy_mode)
+
     if mode == "2":
-        # 跳过预检
         print("\n跳过预检，启动注册流程...")
-        subprocess.run([sys.executable, "preflight.py", "--skip"])
+        subprocess.run([sys.executable, "preflight.py", "--skip"] + proxy_args)
     elif mode == "3":
-        # 完整预检
         print("\n启动完整预检流程...")
-        subprocess.run([sys.executable, "preflight.py", "--full"])
+        subprocess.run([sys.executable, "preflight.py", "--full"] + proxy_args)
     elif mode == "4":
-        # 强制验证
         print("\n启动强制验证流程（忽略 state.json）...")
-        subprocess.run([sys.executable, "preflight.py", "--force"])
+        subprocess.run([sys.executable, "preflight.py", "--force"] + proxy_args)
     elif mode == "5":
-        # 直接注册
         print("\n直接启动注册流程...")
-        subprocess.run([sys.executable, "register.py"])
+        subprocess.run([sys.executable, "register.py", "--auto"] + proxy_args)
     else:
-        # 智能预检（默认）
         print("\n启动智能预检流程...")
-        subprocess.run([sys.executable, "preflight.py", "--smart"])
+        subprocess.run([sys.executable, "preflight.py", "--smart"] + proxy_args)
 
 
-def run_chatgpt():
+def run_chatgpt(proxy_mode):
     """运行 ChatGPT 项目"""
     print_header("启动 ChatGPT 注册")
 
     os.chdir(PROJECT_ROOT / "projects" / "chatgpt")
 
+    proxy_args = _build_proxy_args(proxy_mode)
+
     print("\n启动注册流程...")
-    subprocess.run([sys.executable, "register.py"])
+    subprocess.run([sys.executable, "register.py"] + proxy_args)
 
 
 def main():
@@ -196,14 +284,17 @@ def main():
     if "email" in missing:
         setup_email_file()
 
-    # 2. 选择项目
+    # 2. 配置代理
+    proxy_mode = configure_proxy()
+
+    # 3. 选择项目
     project = select_project()
 
-    # 3. 运行项目
+    # 4. 运行项目
     if project == "evomap":
-        run_evomap()
+        run_evomap(proxy_mode)
     elif project == "chatgpt":
-        run_chatgpt()
+        run_chatgpt(proxy_mode)
 
 
 if __name__ == "__main__":

@@ -38,6 +38,7 @@ env/
 # 项目特定 - 真实数据文件（敏感信息）
 data/outlook令牌号.csv
 data/proxies.txt
+data/free_proxies.txt
 data/mihomo.json
 projects/evomap/output/*.csv
 projects/evomap/output/*.json
