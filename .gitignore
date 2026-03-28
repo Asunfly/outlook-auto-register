@@ -43,6 +43,8 @@ data/mihomo.json
 projects/evomap/output/*.csv
 projects/evomap/output/*.json
 !projects/evomap/output/*.example.json
+projects/sciclaw/output/*
+!projects/sciclaw/output/*.example.json
 projects/chatgpt/output/
 *.log
 

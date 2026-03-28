@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "invite_pool": [
+    "SC-XXXXXXXX"
+  ],
+  "output_codes": [],
+  "accounts": {},
+  "invite_codes_history": {},
+  "statistics": {
+    "total_accounts": 0,
+    "completed": 0,
+    "failed": 0,
+    "total_codes_generated": 0,
+    "last_updated": "2026-03-28 00:00:00"
+  }
+}

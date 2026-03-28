@@ -14,8 +14,8 @@ python start.py
 1. 检查数据文件是否存在
 2. 引导创建邮箱资源池
 3. 配置代理方式（自动抓取免费代理 / 已有代理文件 / Mihomo / 手动输入）
-4. 选择项目（EvoMap / ChatGPT）
-5. 初始化配置（如 EvoMap 初始邀请码）
+4. 选择项目（EvoMap / SciClaw / ChatGPT）
+5. 初始化配置（如 EvoMap / SciClaw 初始邀请码）
 6. 启动注册流程
 
 ### 手动启动
@@ -27,6 +27,10 @@ python start.py
 cd evomap
 python preflight.py
 
+# SciClaw: 直接注册
+cd sciclaw
+python register.py --auto --initial-invite SC-XXXXXXXX
+
 # ChatGPT: 直接注册
 cd chatgpt
 python register.py
@@ -36,6 +40,10 @@ python register.py
 
 ```bash
 # EvoMap 项目
+pip install playwright requests
+playwright install chromium
+
+# SciClaw 项目
 pip install playwright requests
 playwright install chromium
 
@@ -78,6 +86,13 @@ pip install curl_cffi requests
 │   │       ├── state.json       # 运行状态
 │   │       ├── state.example.json  # 状态文件模板
 │   │       └── registration_report.csv  # 注册报告
+│   │
+│   ├── sciclaw/                 # SciClaw 注册项目
+│   │   ├── register.py          # 批量注册主脚本
+│   │   ├── README.md
+│   │   └── output/              # 输出目录（已忽略）
+│   │       ├── state.json       # 运行状态
+│   │       └── state.example.json  # 状态文件模板
 │   │
 │   └── chatgpt/                 # ChatGPT 注册项目
 │       ├── register.py          # 并发注册主脚本
@@ -284,13 +299,15 @@ pool.mark_success(proxy)
 
 **EvoMap 项目**：已集成 Mihomo 代理池，支持自动节点切换和浏览器重启。
 
+**SciClaw 项目**：使用 Playwright 浏览器自动化，无预检流程。
+
 **ChatGPT 项目**：目前使用单个固定代理（通过环境变量或运行时输入）。
 
 ### 数据安全
 
 ⚠️ **重要提示**：
 - 真实数据文件（`outlook令牌号.csv`, `proxies.txt`）已在 `.gitignore` 中配置，不会被提交到代码仓库
-- 输出目录（`projects/evomap/output/`, `projects/chatgpt/output/`）也已忽略，避免泄露注册账号信息
+- 输出目录（`projects/evomap/output/`, `projects/sciclaw/output/`, `projects/chatgpt/output/`）也已忽略，避免泄露注册账号信息
 - 使用示例文件（`.example` 后缀）作为模板，复制后填入真实数据
 - 开发归档目录（`dev-archive/`）和参考文件（`参考文件/`）已忽略，不会被提交
 
@@ -336,6 +353,22 @@ python projects/chatgpt/register.py --help
 - IMAP 通道接码 (不使用 Web API)
 - 自动处理 Arkose/Turnstile 验证
 
+### SciClaw 注册
+
+使用 Playwright 浏览器自动化完成 SciClaw 注册，支持邀请码裂变。
+
+```bash
+python projects/sciclaw/register.py --auto --initial-invite SC-XXXXXXXX
+```
+
+**依赖**: `pip install playwright requests` + `playwright install chromium`
+
+**特点**:
+- 首页 Onboard 流程自动化（邀请码验证、邮箱验证码、DONE）
+- 注册后自动进入用户菜单提取 3 个邀请码
+- 邀请码分配策略：1 个回池、2 个输出
+- 支持断点续跑 (`projects/sciclaw/output/state.json`)
+
 ## 环境要求
 
 - Python 3.8+
@@ -346,4 +379,5 @@ python projects/chatgpt/register.py --help
 
 - [代理配置指南](common/PROXY_GUIDE.md) - 免费代理自动抓取、常规代理和 Mihomo 代理完整配置说明
 - [EvoMap 使用说明](projects/evomap/README.md) - EvoMap 项目详细文档
+- [SciClaw 使用说明](projects/sciclaw/README.md) - SciClaw 项目详细文档
 - [ChatGPT 使用说明](projects/chatgpt/README.md) - ChatGPT 项目详细文档
